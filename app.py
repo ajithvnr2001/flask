@@ -1,63 +1,54 @@
 import os
 import boto3
 import requests
-from flask import Flask, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for
 
 app = Flask(__name__)
 
+def download_file(url, file_path):
+    response = requests.get(url)
+    with open(file_path, 'wb') as file:
+        file.write(response.content)
+
+def upload_to_s3(file_path, bucket_name, object_key, endpoint_url):
+    s3 = boto3.client('s3', endpoint_url=endpoint_url)
+    s3.upload_file(file_path, bucket_name, object_key)
+
+def delete_file(file_path):
+    os.remove(file_path)
+
 @app.route('/', methods=['GET', 'POST'])
-def upload_file():
+def index():
     if request.method == 'POST':
-        # Get user input
-        downloadable_url = request.form['downloadable_url']
+        url = request.form['url']
+        bucket_name = request.form['bucket_name']
         access_key = request.form['access_key']
         secret_key = request.form['secret_key']
         endpoint_url = request.form['endpoint_url']
-        bucket_name = request.form['bucket_name']
         file_name = request.form['file_name']
 
-        # Download the file
-        response = requests.get(downloadable_url)
         file_path = file_name
-        with open(file_path, 'wb') as file:
-            file.write(response.content)
+
+        # Download the file
+        download_file(url, file_path)
+
+        # Configure AWS credentials
+        os.environ['AWS_ACCESS_KEY_ID'] = access_key
+        os.environ['AWS_SECRET_ACCESS_KEY'] = secret_key
 
         # Upload the file to S3
-        s3 = boto3.client('s3', aws_access_key_id=access_key, aws_secret_access_key=secret_key, endpoint_url=endpoint_url)
-        s3.upload_file(file_path, bucket_name, file_name)
+        upload_to_s3(file_path, bucket_name, file_name, endpoint_url)
 
-        # Delete the file from the VM
-        os.remove(file_path)
+        # Delete the file from Vercel server
+        delete_file(file_path)
 
         return redirect(url_for('success'))
 
-    return '''
-        <form method="post">
-            <label for="downloadable_url">Downloadable URL:</label>
-            <input type="text" id="downloadable_url" name="downloadable_url" required><br>
-
-            <label for="access_key">Access Key:</label>
-            <input type="text" id="access_key" name="access_key" required><br>
-
-            <label for="secret_key">Secret Access Key:</label>
-            <input type="text" id="secret_key" name="secret_key" required><br>
-
-            <label for="endpoint_url">Endpoint URL:</label>
-            <input type="text" id="endpoint_url" name="endpoint_url" required><br>
-
-            <label for="bucket_name">Bucket Name:</label>
-            <input type="text" id="bucket_name" name="bucket_name" required><br>
-
-            <label for="file_name">File Name:</label>
-            <input type="text" id="file_name" name="file_name" required><br>
-
-            <input type="submit" value="Upload">
-        </form>
-    '''
+    return render_template('index.html')
 
 @app.route('/success')
 def success():
-    return 'File uploaded successfully!'
+    return "File downloaded, uploaded to S3, and deleted from Vercel server."
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run()
